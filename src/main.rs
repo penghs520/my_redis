@@ -1,7 +1,4 @@
-use std::{
-    net::TcpListener,
-    io::Write,
-};
+use std::{net::TcpListener, io::Write, thread};
 use std::io::Read;
 
 fn main() {
@@ -12,17 +9,19 @@ fn main() {
         match stream {
             Ok(mut stream) => {
                 println!("accepted new connection");
-                let mut buf = [0; 1024];
-                //使用循环等待新的命令
-                loop {
-                    ////这个方法会阻塞，直到客户端输入命令
-                    let n = stream.read(&mut buf).unwrap();
-                    //直到收到 bye命令是才关闭连接
-                    if String::from_utf8_lossy(&buf[..n]).contains("bye") {
-                        break;
+                thread::spawn(move || {
+                    let mut buf = [0; 1024];
+                    //使用循环等待新的命令
+                    loop {
+                        ////这个方法会阻塞，直到客户端输入命令
+                        let n = stream.read(&mut buf).unwrap();
+                        //直到收到 bye命令是才关闭连接
+                        if String::from_utf8_lossy(&buf[..n]).contains("bye") {
+                            break;
+                        }
+                        stream.write(b"+PONG\r\n").unwrap();
                     }
-                    stream.write(b"+PONG\r\n").unwrap();
-                }
+                });
             }
             Err(e) => {
                 println!("error: {}", e);
