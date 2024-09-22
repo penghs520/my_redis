@@ -1,7 +1,13 @@
+use std::collections::HashMap;
 use crate::Command::*;
 use std::error::Error;
+use std::sync::RwLock;
+use once_cell::sync::Lazy;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
+
+//全局变量 db，这里借住once_cell库来定义全局变量，也可以使用核心库的lazy_static!宏，目的都是延迟初始化
+static DB: Lazy<RwLock<HashMap<String, String>>> = Lazy::new(|| RwLock::new(HashMap::new()));
 
 //Tokio提供了执行异步任务的运行时。大多数应用程序可以使用#[tokio::main]宏在tokio运行时运行它们的代码。
 //但是，这个宏只提供基本的配置选项。作为替代方案，tokio::runtime模块为配置和管理运行时提供了更强大的api。如果#[tokio::main]宏不提供所需的功能，则应该使用该模块。
@@ -74,6 +80,24 @@ async fn extract_cmd(socket: &mut TcpStream) -> Result<Command, String> {
                     }
                     return Err("ERR wrong number of arguments for 'echo' command".to_string());
                 }
+                "set" => {
+                    let options = &cmd_with_options[1..];
+                    if options.len() == 2 {
+                        return Ok(Set(options[0].to_string(), options[1].to_string()));
+                    } else if options.len() == 4 {
+                        if "px" == options[2] {
+                            return Ok(SetPx(options[0].to_string(), options[1].to_string(), options[3].parse().unwrap()));
+                        }
+                    }
+                    return Err("ERR wrong number of arguments for 'set' command".to_string());
+                }
+                "get" => {
+                    let options = &cmd_with_options[1..];
+                    if options.len() == 1 {
+                        return Ok(Get(options[0].to_string()));
+                    }
+                    return Err("ERR wrong number of arguments for 'get' command".to_string());
+                }
                 _ => {
                     return Err(format!("Unknown command: {}", cmd));
                 }
@@ -95,6 +119,29 @@ async fn handle_cmd(cmd: Command, socket: &mut TcpStream) -> Result<(u8), String
             // }
             // Ok(())
             match socket.write(b"+PONG\r\n").await {
+                Ok(_) => Ok((1)),
+                Err(r) => {
+                    Err(r.to_string())
+                }
+            }
+        }
+        Set(key, val) => {
+            DB.write().unwrap().insert(key, val.to_string());
+            match socket.write(b"+OK\r\n").await {
+                Ok(_) => Ok((1)),
+                Err(r) => {
+                    Err(r.to_string())
+                }
+            }
+        }
+        Get(key) => {
+            let resp = match DB.read().unwrap().get(&key).cloned() {
+                Some(val) => {
+                    format!("+{}\r\n", val)
+                }
+                None => "$-1\r\n".to_string(),
+            };
+            match socket.write(resp.as_bytes()).await {
                 Ok(_) => Ok((1)),
                 Err(r) => {
                     Err(r.to_string())
@@ -123,6 +170,7 @@ enum Command {
     Echo(String),
     Get(String),
     Set(String, String),
+    SetPx(String, String, u32),
     MultiGet(String, Vec<String>),
     Config(String, Vec<KvPair>),
 }
